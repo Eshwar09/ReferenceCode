@@ -1,0 +1,500 @@
+package com.ingeniorx.butterscotch.lib.benefit.web.controller;
+
+import static com.ingeniorx.butterscotch.authorization.config.utils.IrxPrincipalUtils.convert;
+
+import java.time.LocalDateTime;
+import java.util.List;
+import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Executor;
+import java.util.concurrent.TimeUnit;
+
+import com.ingeniorx.butterscotch.filestatus.dto.filter.BenefitStatusType;
+import com.ingeniorx.butterscotch.lib.benefit.dto.BenefitDto;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.format.annotation.DateTimeFormat;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.web.bind.annotation.DeleteMapping;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.RestController;
+
+import com.ingeniorx.butterscotch.authorization.config.IrxPrincipal;
+import com.ingeniorx.butterscotch.commons.principal.IrxPrincipalDto;
+import com.ingeniorx.butterscotch.lib.benefit.domain.BenefitVersion;
+import com.ingeniorx.butterscotch.lib.benefit.dto.BenefitAccumulatorStructureDto;
+import com.ingeniorx.butterscotch.lib.benefit.dto.BenefitCobDto;
+import com.ingeniorx.butterscotch.lib.benefit.dto.BenefitDawPackageDto;
+import com.ingeniorx.butterscotch.lib.benefit.dto.BenefitDefaultDataDto;
+import com.ingeniorx.butterscotch.lib.benefit.dto.BenefitMandateViewDto;
+import com.ingeniorx.butterscotch.lib.benefit.dto.BenefitNetworkChannelDto;
+import com.ingeniorx.butterscotch.lib.benefit.dto.BenefitPosDurPackageDto;
+import com.ingeniorx.butterscotch.lib.benefit.dto.BenefitProgramViewDto;
+import com.ingeniorx.butterscotch.lib.benefit.dto.BenefitSystematicKeywordActionsUpdateDto;
+import com.ingeniorx.butterscotch.lib.benefit.dto.BenefitSystematicKeywordNamesDto;
+import com.ingeniorx.butterscotch.lib.benefit.dto.BenefitVendorDto;
+import com.ingeniorx.butterscotch.lib.benefit.dto.BenefitVersionDto;
+import com.ingeniorx.butterscotch.lib.benefit.dto.DetailsDto;
+import com.ingeniorx.butterscotch.lib.benefit.dto.InputBenefitDto;
+import com.ingeniorx.butterscotch.lib.benefit.dto.ProductionDateDto;
+import com.ingeniorx.butterscotch.lib.benefit.dto.enums.ModuleType;
+import com.ingeniorx.butterscotch.lib.benefit.service.BenefitSystematicKeywordService;
+import com.ingeniorx.butterscotch.lib.benefit.service.BenefitVersionService;
+import com.ingeniorx.butterscotch.lib.benefit.dto.BenefitNetworkChannelUpdateDto;
+import com.ingeniorx.butterscotch.lib.formulary.dto.NetFormularyDto;
+
+import io.swagger.v3.oas.annotations.Hidden;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
+import io.swagger.v3.oas.annotations.tags.Tag;
+
+@RestController
+@RequestMapping("benefitVersion")
+@Tag(name = "Benefit Versions", description = "CRUD Operations for BenefitVersion")
+public class BenefitVersionsController {
+	private static final String OBSOLETE = "OBSOLETE";
+	
+    @Autowired
+    private BenefitVersionService benefitVersionService;
+    
+    @Autowired
+    private BenefitSystematicKeywordService benefitSystematicKeywordService;
+
+    @Autowired
+    @Qualifier("ingestionExecutor")
+    private Executor ingestionExecutor;
+
+
+    @Operation(summary = "Get an benefit version by ID")
+    @GetMapping("/{id}")
+    public ResponseEntity<BenefitVersionDto> getBenefitVersionById(
+      @PathVariable("id") String id,
+      @Parameter(hidden = true) @AuthenticationPrincipal IrxPrincipal principal
+    ) {
+        return Optional
+          .ofNullable(benefitVersionService.get(id, convert(principal)))
+          .map(benefitVersion -> ResponseEntity.ok().body(benefitVersion))
+                .orElseGet(() -> ResponseEntity.notFound().build());
+    }
+
+    @Operation(summary = "Create a benefit version")
+    @PostMapping()
+    @Hidden
+    @PreAuthorize("hasAuthority('benefits.edit')")
+    public CompletableFuture<BenefitVersionDto> createBenefitVersion(
+      @RequestBody InputBenefitDto benefitVersionDto,
+      @Parameter(hidden = true) @AuthenticationPrincipal IrxPrincipal principal
+    ) {
+    	CompletableFuture<BenefitVersionDto> completableFutureBenefitVersionDto = CompletableFuture.supplyAsync(() ->
+          benefitVersionService.save(benefitVersionDto, convert(principal)), ingestionExecutor);
+    	try {
+			completableFutureBenefitVersionDto.get(3000, TimeUnit.SECONDS);
+		} catch (Exception e) {
+
+			e.printStackTrace();
+		}
+		return completableFutureBenefitVersionDto;
+    }
+
+    @Operation(summary = "Update a benefit version")
+    @PutMapping("/{id}")
+    @PreAuthorize("hasAuthority('benefits.edit')")
+    public ResponseEntity updateBenefitVersion(
+            @PathVariable("id") String id,
+            @RequestBody BenefitVersionDto benefitVersionDto,
+            @Parameter(hidden = true) @AuthenticationPrincipal IrxPrincipal principal
+    ) {
+        long validId = benefitVersionService.validateId(id);
+        return ResponseEntity.ok().body(benefitVersionService.updateBenefitVersion(benefitVersionDto, validId, convert(principal)));
+    }
+
+    @Operation(summary = "Add production date to a benefit version")
+    @PutMapping("/status/{benefitPlanId}/{majorVersion}/{minorVersion}")
+    public ResponseEntity<BenefitVersionDto> addProductionDate(
+            @PathVariable("benefitPlanId") String benefitPlanId,
+            @PathVariable("majorVersion") Integer majorVersion,
+            @PathVariable("minorVersion") Integer minorVersion,
+            @RequestBody ProductionDateDto productionDate,
+            @Parameter(hidden = true) @AuthenticationPrincipal IrxPrincipal principal) {
+        BenefitVersionDto benefitVersionDto = benefitVersionService.addProductionDate(productionDate, benefitPlanId, majorVersion, minorVersion, convert(principal));
+        return ResponseEntity.ok().body(benefitVersionDto);
+    }
+
+    @Operation(summary = "Add production date to a benefit version")
+    @PutMapping("/status/v2/{benefitPlanId}/{majorVersion}/{minorVersion}")
+    public void addProductionDateV2(
+            @PathVariable("benefitPlanId") String benefitPlanId,
+            @PathVariable("majorVersion") Integer majorVersion,
+            @PathVariable("minorVersion") Integer minorVersion,
+            @RequestBody ProductionDateDto productionDate,
+            @Parameter(hidden = true) @AuthenticationPrincipal IrxPrincipal principal) {
+        benefitVersionService.addProductionDateV2(productionDate, benefitPlanId, majorVersion, minorVersion);
+    }
+
+    @Operation(summary = "Unlock benefit version")
+    @PutMapping("/unlock/{id}")
+    @PreAuthorize("hasAuthority('benefits.edit')")
+    public ResponseEntity<BenefitVersionDto> unlockBenefitVersion(
+            @PathVariable("id") String id,
+            @Parameter(hidden = true) @AuthenticationPrincipal IrxPrincipal principal) {
+        long validId = benefitVersionService.validateId(id);
+        BenefitVersionDto benefitVersionDto = benefitVersionService.setLockedForBenefitVersion(validId, convert(principal), false, true);
+        return ResponseEntity.ok().body(benefitVersionDto);
+    }
+
+    @Operation(summary = "Delete a benefit version")
+    @DeleteMapping("/{id}")
+    public ResponseEntity deleteBenefitVersion(
+            @PathVariable("id") String id,
+            @Parameter(hidden = true) @AuthenticationPrincipal IrxPrincipal principal) {
+        long validId = benefitVersionService.validateId(id);
+        benefitVersionService.delete(validId, convert(principal));
+        return new ResponseEntity<>(HttpStatus.OK);
+    }
+    
+    @GetMapping("/verify/legacyBenefitPlanId")
+	@Operation(summary = " Verify Legacy benefit plan id locked for other benefit")
+	public ResponseEntity isLegacyBenefitPlanIdLocked(
+			@RequestParam("legacyBenefitPlanId") String legacyBenefitPlanId,
+			@RequestParam("clientId") Long clientId,
+			@RequestParam("benefitPlanId") String benefitPlanId,
+			@Parameter(hidden = true) @AuthenticationPrincipal IrxPrincipal principal) {
+    	
+		return ResponseEntity.ok().body(benefitVersionService.isLegacyBenefitPlanIdLocked(legacyBenefitPlanId, clientId, benefitPlanId, convert(principal)));
+	}
+    
+    @GetMapping("/majorBenefitVersion")
+	@Operation(summary = " Get latest Major Benefit Version ")
+	public ResponseEntity<Object> findMajorVersionBenefit(
+			@RequestParam("benefitPlanId") String benefitPlanId,
+			@RequestParam(value="effectiveDate",required = false) @DateTimeFormat(pattern="yyyy-MM-dd'T'HH:mm:ss") LocalDateTime effectiveDate,
+			@Parameter(hidden = true) @AuthenticationPrincipal IrxPrincipal principal) {
+    	
+    	BenefitVersion benefitVersion=benefitVersionService.findMajorVersionBenefit(benefitPlanId,effectiveDate, convert(principal));
+    	if(null == benefitVersion) {
+    		return ResponseEntity.ok("Benefit does not have a major version");
+        }
+		// IBP-25848:contractcode, system validation on obsolete status benefits
+		String checkBenefitStatus = benefitVersionService.getBenefitStatusToCheckObsoleteOrNot(benefitPlanId, principal.getToken());
+		return checkBenefitStatus.equalsIgnoreCase(OBSOLETE)
+				? ResponseEntity.ok("Obsolete benefits cannot be associated to contract code")
+				: (benefitVersion != null ? ResponseEntity.ok().body(benefitVersion)
+						: ResponseEntity.ok("No record found"));
+    	
+	}
+    
+    @GetMapping("/general/{versionId}")
+    @Operation(summary = "Get benefit General Default details by Benefit Version Id")
+    public ResponseEntity<BenefitDefaultDataDto> getBenefitDefaultDataByBenefitVersionId(
+    		@PathVariable("versionId") Long versionId,
+    		@Parameter(hidden = true) @AuthenticationPrincipal IrxPrincipal principal) {
+    	return ResponseEntity.ok().body(benefitVersionService.getGeneralDefaultDataByVersionId(versionId, convert(principal)));
+    }
+
+    @GetMapping("pos/{versionId}")
+    @Operation(summary = "Get benefit PosDurPackage by Benefit Version Id")
+    public ResponseEntity<BenefitPosDurPackageDto> getBenefitPosDurPackageByBenefitVersionId(
+    		@PathVariable("versionId") Long versionId,
+    		@Parameter(hidden = true) @AuthenticationPrincipal IrxPrincipal principal) {
+    	return ResponseEntity.ok().body(benefitVersionService.getBenefitPosDurPackageByBenefitVersionId(versionId, convert(principal)));
+    }
+
+    @GetMapping("/daw/{versionId}")
+    @Operation(summary = " Get the BenefitDaw with Package based on the versionId")
+    public ResponseEntity<BenefitDawPackageDto> getBenefitDawByVersionId(
+    		@PathVariable("versionId") Long versionId,
+    		@Parameter(hidden = true) @AuthenticationPrincipal IrxPrincipal principa) {
+    	return ResponseEntity.ok().body(benefitVersionService.getBenefitDawByVersionId(versionId,convert(principa)));
+    }
+
+    @GetMapping("/Vendor/{versionId}")
+    @Operation(summary = " Get the benefitVendor based on the versionId")
+    public ResponseEntity<BenefitVendorDto> getBenefitVendorByVersionId(
+    		@PathVariable("versionId") Long versionId) {
+    	return ResponseEntity.ok().body(benefitVersionService.getBenefitVendorByVersionId(versionId));
+    }
+
+    @Operation(summary = "Get benefit programs  by benefit version id")
+    @GetMapping("/programs/{versionId}")
+    public List<BenefitProgramViewDto> getPrograms(
+    		@PathVariable("versionId") Long versionId,
+    		@RequestParam("moduleType") ModuleType moduleType,
+    		@Parameter(hidden = true) @AuthenticationPrincipal IrxPrincipal principal){
+    	return benefitVersionService.getPrograms(versionId,moduleType,convert(principal));
+    }
+
+    @Operation(summary = "Get benefit mandates  by benefit version id")
+    @GetMapping("/mandates/{versionId}")
+    public List<BenefitMandateViewDto> getMandates(
+    		@PathVariable("versionId") Long versionId,
+    		@RequestParam("moduleType") ModuleType moduleType,
+    		@Parameter(hidden = true) @AuthenticationPrincipal IrxPrincipal principal){
+    	return benefitVersionService.getMandates(versionId,moduleType,convert(principal));
+    }
+
+    @GetMapping("/cob/{versionId}")
+    @Operation(summary = " Get the BenefitCob with Package based on the versionId")
+    public ResponseEntity<BenefitCobDto> getBenefitCobByVersionId(
+    		@PathVariable("versionId") Long versionId) {
+    	return ResponseEntity.ok().body(benefitVersionService.getBenefitCobByVersionId(versionId));
+    }
+
+    @Operation(summary = "Get benefit accum structure by benefit version id")
+    @GetMapping("/accum/{versionId}")
+    public ResponseEntity<BenefitAccumulatorStructureDto> getBenefitAccumStructureByVersionId(
+    		@PathVariable("versionId") Long versionId,
+    		@Parameter(hidden = true) @AuthenticationPrincipal IrxPrincipal principal) {
+    	return ResponseEntity.ok().body(benefitVersionService.getBenefitAccumStructureByVersionId(versionId,convert(principal)));
+    }
+
+    @GetMapping("/network/{versionId}")
+    @Operation(summary = "Get benefit network channel by Benefit Version Id")
+    public ResponseEntity<List<BenefitNetworkChannelDto>> getBenefitNetworkChannelByBenefitVersionId(
+    		@PathVariable("versionId") Long versionId, @Parameter(hidden = true) 
+    		@AuthenticationPrincipal IrxPrincipal principal) {
+    	return ResponseEntity.ok().body(benefitVersionService.getBenefitNetworkChannelByBenefitVersionId(versionId, convert(principal)));
+    }
+    
+    @Operation(summary = "Update a General information")
+    @PutMapping("/general/{versionId}")
+    public ResponseEntity<BenefitDefaultDataDto> updateGeneralDefaults(
+            @PathVariable("versionId") Long versionId,
+            @RequestBody BenefitDefaultDataDto benefitDefaultDataDto,
+            @Parameter(hidden = true) @AuthenticationPrincipal IrxPrincipal principal
+    ) {
+        return ResponseEntity.ok().body(benefitVersionService.updateGeneralDefaults(benefitDefaultDataDto,versionId, convert(principal)));
+    }
+    
+    @Operation(summary = "Update a posDur information")
+    @PutMapping("/pos/{versionId}")
+    public ResponseEntity<BenefitPosDurPackageDto> updatePosDur(
+            @PathVariable("versionId") Long versionId,
+            @RequestBody BenefitPosDurPackageDto benefitPosDurPackageDto,
+            @Parameter(hidden = true) @AuthenticationPrincipal IrxPrincipal principal
+    ) {
+        return ResponseEntity.ok().body(benefitVersionService.updatePosDur(benefitPosDurPackageDto,versionId, convert(principal)));
+    }
+    
+    @Operation(summary = "Update a daw information")
+    @PutMapping("/daw/{versionId}")
+    public ResponseEntity<BenefitDawPackageDto> updateDawPackage(
+            @PathVariable("versionId") Long versionId,
+            @RequestBody BenefitDawPackageDto benefitDawPackageDto,
+            @Parameter(hidden = true) @AuthenticationPrincipal IrxPrincipal principal
+    ) {
+        return ResponseEntity.ok().body(benefitVersionService.updateDawPackage(benefitDawPackageDto,versionId, convert(principal)));
+    }
+    
+    @Operation(summary = "Update a cob information")
+    @PutMapping("/cob/{versionId}")
+    public ResponseEntity<BenefitCobDto> updateCob(
+            @PathVariable("versionId") Long versionId,
+            @RequestBody BenefitCobDto benefitCobDto,
+            @Parameter(hidden = true) @AuthenticationPrincipal IrxPrincipal principal
+    ) {
+        return ResponseEntity.ok().body(benefitVersionService.updateCob(benefitCobDto,versionId,convert(principal)));
+    }
+    
+    @Operation(summary = "Update a accum information")
+    @PutMapping("/accum/{versionId}")
+    public ResponseEntity<BenefitAccumulatorStructureDto> updateAccums(
+            @PathVariable("versionId") Long versionId,
+            @RequestBody BenefitAccumulatorStructureDto benefitAccumulatorStructureDto,
+            @Parameter(hidden = true) @AuthenticationPrincipal IrxPrincipal principal
+    ) {
+        return ResponseEntity.ok().body(benefitVersionService.updateAccums(benefitAccumulatorStructureDto,versionId, convert(principal)));
+    }
+    
+    @Operation(summary = "Update a vendor information")
+    @PutMapping("/vendor/{versionId}")
+    public ResponseEntity<BenefitVendorDto> updateVendor(
+            @PathVariable("versionId") Long versionId,
+            @RequestBody BenefitVendorDto benefitVendorDto,
+            @Parameter(hidden = true) @AuthenticationPrincipal IrxPrincipal principal) {
+        return ResponseEntity.ok().body(benefitVersionService.updateVendor(benefitVendorDto,versionId,convert(principal)));
+    }
+    
+    @Operation(summary = "Update formulary information")
+    @PutMapping("/formulary/{netFormularyId}/{versionId}")
+    public ResponseEntity<NetFormularyDto> updateFormulary(
+            @PathVariable("versionId") Long versionId,
+            @PathVariable("netFormularyId") Long netFormularyId,
+            @Parameter(hidden = true) @AuthenticationPrincipal IrxPrincipal principal
+    ) {
+        return ResponseEntity.ok().body(benefitVersionService.updateFormulary(versionId,netFormularyId, convert(principal)));
+    }
+    
+    @Operation(summary = "Update formulary information")
+    @PutMapping("/network/{versionId}")
+    public ResponseEntity<List<BenefitNetworkChannelDto>> updateNetworkChannel(
+            @PathVariable("versionId") Long versionId,
+            @RequestBody BenefitNetworkChannelUpdateDto benefitNetworkChannelUpdateDto,
+            @Parameter(hidden = true) @AuthenticationPrincipal IrxPrincipal principal
+    ) {
+
+        return ResponseEntity.ok().body(benefitVersionService.updateNetworkChannel(versionId,benefitNetworkChannelUpdateDto.getBenefitNetworkChannelDto(),benefitNetworkChannelUpdateDto.getNewlyDeletedBNCList(), convert(principal)));
+    }
+    
+    @Operation(summary = "Update benefit's basic information")
+    @PutMapping("/details/{versionId}")
+    public ResponseEntity<BenefitVersionDto> updateDetails(
+    		@PathVariable("versionId") Long versionId,
+    		@RequestBody DetailsDto benefitVersionDto,
+    		@Parameter(hidden = true) @AuthenticationPrincipal IrxPrincipal principal
+    		) {
+    	return ResponseEntity.ok().body(benefitVersionService.updateDetails(versionId,benefitVersionDto, convert(principal)));
+    }
+    
+    @Operation(summary = "Update posDur's information")
+    @DeleteMapping("/posDur/{versionId}")
+    public ResponseEntity deleteBenefitPosDur(
+    		@PathVariable("versionId") Long versionId,
+    		@Parameter(hidden = true) @AuthenticationPrincipal IrxPrincipal principal) {
+    	benefitVersionService.deleteBenefitPosDur(versionId,convert(principal));
+        return new ResponseEntity<>(HttpStatus.OK);
+    }
+    
+    @Operation(summary = "Update Formulary information")
+    @DeleteMapping("/formulary/{versionId}")
+    public ResponseEntity deleteFormulary(
+    		@PathVariable("versionId") Long versionId,
+    		@Parameter(hidden = true) @AuthenticationPrincipal IrxPrincipal principal) {
+    	benefitVersionService.deleteFormulary(versionId,convert(principal));
+        return new ResponseEntity<>(HttpStatus.OK);
+    }
+    
+    @Operation(summary = "Update vendor information")
+    @DeleteMapping("/vendor/{versionId}")
+    public ResponseEntity deleteVendor(
+    		@PathVariable("versionId") Long versionId,
+    		@Parameter(hidden = true) @AuthenticationPrincipal IrxPrincipal principal) {
+    	benefitVersionService.deleteVendor(versionId,convert(principal));
+        return new ResponseEntity<>(HttpStatus.OK);
+    }
+    
+    @Operation(summary = "Unlock benefit version")
+    @PutMapping("/unlock/version/{id}")
+    @PreAuthorize("hasAuthority('benefits.edit')")
+    public ResponseEntity unlockVersion(
+            @PathVariable("id") String id,
+            @RequestParam(required = false, defaultValue ="false") boolean auditRequired,
+            @Parameter(hidden = true) @AuthenticationPrincipal IrxPrincipal principal) {
+        Long validId = benefitVersionService.validateId(id);
+        benefitVersionService.setLockedForVersion(validId, convert(principal), false, true, auditRequired);
+        return new ResponseEntity<>(HttpStatus.OK);
+    }
+   
+    @Operation(summary = "persist audit log for save button")
+	@PutMapping("/saveAudit/{versionId}")
+	public ResponseEntity benefitSaveAuditLog(@PathVariable("versionId") String versionId,
+			@Parameter(hidden = true) @AuthenticationPrincipal IrxPrincipal principal) {
+		Long validId = benefitVersionService.validateId(versionId);
+		benefitVersionService.persistBenefitAuditLog(validId, convert(principal));
+		return new ResponseEntity<>(HttpStatus.OK);
+
+	}
+
+    @GetMapping("/getBenefitSystematicKeywordActions/{versionId}/{sysName}")
+    @Operation(summary = " Get the Benefit Systematic Keyword Actions based on the VersionId and Systematic Keyword Name")
+    public ResponseEntity<List<BenefitSystematicKeywordActionsUpdateDto>> getBenefitSystematicKeywordActions(
+            @PathVariable("versionId") Long versionId,@PathVariable("sysName") String sysName) {
+        return ResponseEntity.ok().body(benefitSystematicKeywordService.getBenefitSystematicKeywordActions(versionId,sysName));
+    }
+    
+    @GetMapping("/getSystematicKeywordNames/{versionId}")
+    @Operation(summary = " Get the Systematic Keyword Names form Benefit Systematic Keyword based on the versionId")
+    public ResponseEntity<BenefitSystematicKeywordNamesDto> getSystematicKeywordNamesByVersionId(
+            @PathVariable("versionId") Long versionId) {
+        return ResponseEntity.ok().body(benefitSystematicKeywordService.getSystematicKeywordNamesByVersionId(versionId));
+    }
+
+    @Operation(summary = "Get verdionId and Major and Minor versions by uniquePlanVersionId")
+    @GetMapping("/contractPlan/{uniqueBenefitPlanVersionId}")
+    public BenefitVersionDto getIdAndMajorMinorVersionsByUniquePlanVersion(
+    		@PathVariable("uniqueBenefitPlanVersionId") String uniqueBenefitPlanVersionId,
+			@Parameter(hidden = true) @AuthenticationPrincipal IrxPrincipal principal) {
+		return benefitVersionService.getVersionIdAndMinorVersionsByUniquePlanVersion(uniqueBenefitPlanVersionId, convert(principal));
+	}
+    
+    @GetMapping("/getAccumLibraryData/{benefitVersionId}/{libraryId}")
+    @Operation(summary = "Get the accum library data in Benefit Accum Structure DTO model")
+    public BenefitAccumulatorStructureDto getDataFromAccumLib(
+    		@PathVariable("benefitVersionId") Long benefitVersionId,
+    		@PathVariable ("libraryId") Long libraryId,
+    		@Parameter(hidden = true) @AuthenticationPrincipal IrxPrincipal principal) {
+    	return benefitVersionService.getBenefitAccumStructureFromLibrary(benefitVersionId, libraryId, convert(principal));
+    	
+    }
+    
+    @GetMapping("/getAuditSystematicKeywordNames/{versionId}")
+    @Operation(summary = " Get the Systematic Keyword Names from Benefit Systematic Keyword Action Update table based on the versionId")
+    public ResponseEntity<BenefitSystematicKeywordNamesDto> getSystematicKeywordNamesByVersionIdForStatusPage(
+            @PathVariable("versionId") Long versionId) {
+        return ResponseEntity.ok().body(benefitSystematicKeywordService.getSysKeyNamesByVersiondForStatusPage(versionId));
+    }
+    
+    @GetMapping("/getLatestVersionId")
+    @Operation(summary = "Get latest benefit version id")
+    public Long getBenefitLatestVersionId(@RequestParam("benefitPlanId") String benefitPlanId,
+            @RequestParam("majorVersion") Long majorVersion,
+            @RequestParam("minorVersion") Long minorVersion,
+            @Parameter(hidden = true) @AuthenticationPrincipal IrxPrincipalDto principal) {
+        return benefitVersionService.getLatestBenefitVersionId(benefitPlanId,majorVersion,minorVersion,principal);
+    }
+
+    @GetMapping("/getLatestVersionId/v2")
+    @Operation(summary = "Get latest benefit version id")
+    public Long getBenefitLatestVersionIdV2(@RequestParam("benefitPlanId") String benefitPlanId,
+                                            @RequestParam("majorVersion") Long majorVersion,
+                                            @RequestParam("minorVersion") Long minorVersion,
+                                            @Parameter(hidden = true) @AuthenticationPrincipal IrxPrincipalDto principal) {
+        return benefitVersionService.getLatestBenefitVersionIdV2(benefitPlanId,majorVersion,minorVersion);
+    }
+
+    @GetMapping("/contractCode/majorBenefitVersion")
+ 	@Operation(summary = " Get latest Major Benefit Version for ContractCode")
+ 	public ResponseEntity<BenefitVersionDto> findMajorVersionBenefitForContractCode(
+ 			@RequestParam("benefitPlanId") String benefitPlanId,
+ 			@Parameter(hidden = true) @AuthenticationPrincipal IrxPrincipal principal) {
+     	BenefitVersionDto benefitVersion=benefitVersionService.findMajorVersionBenefitForContractCode(benefitPlanId, convert(principal));
+     	return ResponseEntity.ok().body(benefitVersion);
+ 	}
+
+    @Operation(summary = "Get an benefit version by ID")
+    @GetMapping("/v2/{id}")
+    public  ResponseEntity<BenefitDto> getBenefitVersionByIdV2(
+            @PathVariable("id") String id,
+            @Parameter(hidden = true) @AuthenticationPrincipal IrxPrincipal principal
+    ) {
+       return  ResponseEntity.ok().body(benefitVersionService.getBenefitVersionDetails(id, convert(principal), null));
+    }
+
+    @Operation(summary = "Get an benefit version by ID")
+    @GetMapping("/{id}/{status}")
+    public  ResponseEntity<BenefitDto> getBenefitVersionByIdAndStatus(
+            @PathVariable("id") String id,
+            @PathVariable("status") BenefitStatusType status,
+            @Parameter(hidden = true) @AuthenticationPrincipal IrxPrincipal principal
+    ) {
+        return  ResponseEntity.ok().body(benefitVersionService.getBenefitVersionDetails(id, convert(principal), status));
+    }
+
+    @GetMapping("/saveWithoutExist/{benefitId}")
+    @Operation(summary = "Get an Latest benefit versionId by benefit ID")
+    @PreAuthorize("hasAuthority('benefits.view') or hasAuthority('benefits.edit')")
+    public ResponseEntity<Long> getLatestBenefitVersionIdByBenefitId(
+            @PathVariable("benefitId") Long benefitId,
+            @Parameter(hidden = true) @AuthenticationPrincipal IrxPrincipal principal ) {
+        return ResponseEntity.ok().body(benefitVersionService.getLatestBenefitVersionIdByBenefitId(benefitId));
+    }
+
+}
